@@ -84,7 +84,14 @@ namespace TarkovPriceViewer
             this.label2 = new System.Windows.Forms.Label();
             this.tarkovTrackerApiKey_textbox = new System.Windows.Forms.TextBox();
             this.label1 = new System.Windows.Forms.Label();
+            this.panel9 = new System.Windows.Forms.Panel();
+            this.worthThresholdNumeric = new System.Windows.Forms.NumericUpDown();
+            this.worthThresholdLabel = new System.Windows.Forms.Label();
             this.TarkovTrackerAPI_tooltip = new System.Windows.Forms.ToolTip(this.components);
+            this.languageBox = new System.Windows.Forms.ComboBox();
+            this.label3 = new System.Windows.Forms.Label();
+            this.modeBox = new System.Windows.Forms.ComboBox();
+            this.label4 = new System.Windows.Forms.Label();
             this.TrayMenu.SuspendLayout();
             this.panel1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.TransParent_Bar)).BeginInit();
@@ -96,6 +103,8 @@ namespace TarkovPriceViewer
             this.panel6.SuspendLayout();
             this.panel7.SuspendLayout();
             this.panel8.SuspendLayout();
+            this.panel9.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.worthThresholdNumeric)).BeginInit();
             this.SuspendLayout();
             // 
             // TrayIcon
@@ -262,7 +271,7 @@ namespace TarkovPriceViewer
             // week_price_box
             // 
             this.week_price_box.AutoSize = true;
-            this.week_price_box.Location = new System.Drawing.Point(524, 26);
+            this.week_price_box.Location = new System.Drawing.Point(12, 45);
             this.week_price_box.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.week_price_box.Name = "week_price_box";
             this.week_price_box.Size = new System.Drawing.Size(86, 16);
@@ -480,7 +489,7 @@ namespace TarkovPriceViewer
             // MinimizetoTrayWhenStartup
             // 
             this.MinimizetoTrayWhenStartup.AutoSize = true;
-            this.MinimizetoTrayWhenStartup.Location = new System.Drawing.Point(262, 383);
+            this.MinimizetoTrayWhenStartup.Location = new System.Drawing.Point(431, 424);
             this.MinimizetoTrayWhenStartup.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.MinimizetoTrayWhenStartup.Name = "MinimizetoTrayWhenStartup";
             this.MinimizetoTrayWhenStartup.Size = new System.Drawing.Size(181, 16);
@@ -529,7 +538,7 @@ namespace TarkovPriceViewer
             this.panel3.Controls.Add(this.TransParent_Text);
             this.panel3.Controls.Add(this.TransParent_Desc);
             this.panel3.Controls.Add(this.TransParent_Bar);
-            this.panel3.Location = new System.Drawing.Point(12, 324);
+            this.panel3.Location = new System.Drawing.Point(12, 384);
             this.panel3.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.panel3.Name = "panel3";
             this.panel3.Size = new System.Drawing.Size(296, 51);
@@ -539,7 +548,7 @@ namespace TarkovPriceViewer
             // 
             this.panel5.Controls.Add(this.Version);
             this.panel5.Controls.Add(this.CheckUpdate);
-            this.panel5.Location = new System.Drawing.Point(15, 376);
+            this.panel5.Location = new System.Drawing.Point(15, 438);
             this.panel5.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.panel5.Name = "panel5";
             this.panel5.Size = new System.Drawing.Size(184, 28);
@@ -547,7 +556,7 @@ namespace TarkovPriceViewer
             // 
             // Exit_Button
             // 
-            this.Exit_Button.Location = new System.Drawing.Point(534, 378);
+            this.Exit_Button.Location = new System.Drawing.Point(538, 446);
             this.Exit_Button.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
             this.Exit_Button.Name = "Exit_Button";
             this.Exit_Button.Size = new System.Drawing.Size(74, 23);
@@ -712,13 +721,103 @@ namespace TarkovPriceViewer
             this.label1.Text = "Use TarkovTracker.io?";
             this.label1.MouseHover += new System.EventHandler(this.label1_MouseHover);
             // 
+            // panel9
+            // 
+            this.panel9.Controls.Add(this.worthThresholdNumeric);
+            this.panel9.Controls.Add(this.worthThresholdLabel);
+            this.panel9.Location = new System.Drawing.Point(12, 324);
+            this.panel9.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
+            this.panel9.Name = "panel9";
+            this.panel9.Size = new System.Drawing.Size(296, 51);
+            this.panel9.TabIndex = 22;
+            // 
+            // worthThresholdNumeric
+            // 
+            this.worthThresholdNumeric.Increment = new decimal(new int[] {
+            100,
+            0,
+            0,
+            0});
+            this.worthThresholdNumeric.Location = new System.Drawing.Point(15, 30);
+            this.worthThresholdNumeric.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
+            this.worthThresholdNumeric.Maximum = new decimal(new int[] {
+            1000000,
+            0,
+            0,
+            0});
+            this.worthThresholdNumeric.Minimum = new decimal(new int[] {
+            100,
+            0,
+            0,
+            0});
+            this.worthThresholdNumeric.Name = "worthThresholdNumeric";
+            this.worthThresholdNumeric.Size = new System.Drawing.Size(126, 21);
+            this.worthThresholdNumeric.TabIndex = 1;
+            this.worthThresholdNumeric.TabStop = false;
+            this.worthThresholdNumeric.Value = new decimal(new int[] {
+            7500,
+            0,
+            0,
+            0});
+            this.worthThresholdNumeric.ValueChanged += new System.EventHandler(this.worthThresholdNumeric_ValueChanged);
+            // 
+            // worthThresholdLabel
+            // 
+            this.worthThresholdLabel.AutoSize = true;
+            this.worthThresholdLabel.Font = new System.Drawing.Font("Microsoft Sans Serif", 9F, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Point, ((byte)(129)));
+            this.worthThresholdLabel.Location = new System.Drawing.Point(10, 9);
+            this.worthThresholdLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.worthThresholdLabel.Name = "worthThresholdLabel";
+            this.worthThresholdLabel.Size = new System.Drawing.Size(157, 15);
+            this.worthThresholdLabel.TabIndex = 0;
+            this.worthThresholdLabel.Text = "Worth threshold (₽/slot)";
+            // 
+            // languageBox
+            // 
+            this.languageBox.FormattingEnabled = true;
+            this.languageBox.Location = new System.Drawing.Point(543, 11);
+            this.languageBox.Name = "languageBox";
+            this.languageBox.Size = new System.Drawing.Size(69, 20);
+            this.languageBox.TabIndex = 18;
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(500, 15);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(40, 12);
+            this.label3.TabIndex = 19;
+            this.label3.Text = "Detect";
+            // 
+            // modeBox
+            // 
+            this.modeBox.FormattingEnabled = true;
+            this.modeBox.Location = new System.Drawing.Point(543, 37);
+            this.modeBox.Name = "modeBox";
+            this.modeBox.Size = new System.Drawing.Size(69, 20);
+            this.modeBox.TabIndex = 20;
+            // 
+            // label4
+            // 
+            this.label4.AutoSize = true;
+            this.label4.Location = new System.Drawing.Point(503, 41);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(37, 12);
+            this.label4.TabIndex = 21;
+            this.label4.Text = "Mode";
+            // 
             // MainForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 12F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink;
             this.BackColor = System.Drawing.Color.White;
-            this.ClientSize = new System.Drawing.Size(621, 411);
+            this.ClientSize = new System.Drawing.Size(621, 475);
+            this.Controls.Add(this.label4);
+            this.Controls.Add(this.modeBox);
+            this.Controls.Add(this.label3);
+            this.Controls.Add(this.languageBox);
+            this.Controls.Add(this.panel9);
             this.Controls.Add(this.week_price_box);
             this.Controls.Add(this.panel8);
             this.Controls.Add(this.panel5);
@@ -760,6 +859,9 @@ namespace TarkovPriceViewer
             this.panel7.PerformLayout();
             this.panel8.ResumeLayout(false);
             this.panel8.PerformLayout();
+            this.panel9.ResumeLayout(false);
+            this.panel9.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.worthThresholdNumeric)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -771,32 +873,36 @@ namespace TarkovPriceViewer
         private System.Windows.Forms.ToolStripMenuItem trayshow;
         private System.Windows.Forms.ToolStripMenuItem trayexit;
         private System.Windows.Forms.Panel panel1;
-        private System.Windows.Forms.Label ShowOverlay_Desc;
-        private System.Windows.Forms.Button CheckUpdate;
+        private System.Windows.Forms.CheckBox hideoutUpgrades_checkBox;
+        private System.Windows.Forms.CheckBox day_price_box;
+        private System.Windows.Forms.CheckBox buy_from_trader_box;
+        private System.Windows.Forms.CheckBox needs_box;
+        private System.Windows.Forms.CheckBox barters_and_crafts_box;
+        private System.Windows.Forms.CheckBox sell_to_trader_box;
+        private System.Windows.Forms.CheckBox last_price_box;
         private System.Windows.Forms.Button ShowOverlay_Button;
+        private System.Windows.Forms.Label ShowOverlay_Desc;
+        private System.Windows.Forms.CheckBox week_price_box;
+        private System.Windows.Forms.Label TransParent_Text;
+        private System.Windows.Forms.CheckBox CloseOverlayWhenMouseMoved;
+        private System.Windows.Forms.TrackBar TransParent_Bar;
+        private System.Windows.Forms.Label HideOverlay_Desc2;
+        private System.Windows.Forms.Label TransParent_Desc;
         private System.Windows.Forms.Button HideOverlay_Button;
         private System.Windows.Forms.Label HideOverlay_Desc;
-        private System.Windows.Forms.Label TransParent_Desc;
+        private System.Windows.Forms.Button CheckUpdate;
         private System.Windows.Forms.Button Github;
         private System.Windows.Forms.Button TarkovMarket;
         private System.Windows.Forms.Button TarkovWiki;
         private System.Windows.Forms.Panel panel4;
+        private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.Button TarkovTracker_button;
+        private System.Windows.Forms.Button Tarkov_Dev;
         private System.Windows.Forms.Label DataProvidedBy;
+        private System.Windows.Forms.Button Tarkov_Official;
         private System.Windows.Forms.CheckBox MinimizetoTrayWhenStartup;
-        private System.Windows.Forms.CheckBox CloseOverlayWhenMouseMoved;
-        private System.Windows.Forms.Label HideOverlay_Desc2;
-        private System.Windows.Forms.TrackBar TransParent_Bar;
-        private System.Windows.Forms.Label TransParent_Text;
         private System.Windows.Forms.Label Version;
         private System.Windows.Forms.PictureBox pictureBox1;
-        private System.Windows.Forms.CheckBox last_price_box;
-        private System.Windows.Forms.CheckBox week_price_box;
-        private System.Windows.Forms.CheckBox day_price_box;
-        private System.Windows.Forms.CheckBox buy_from_trader_box;
-        private System.Windows.Forms.CheckBox sell_to_trader_box;
-        private System.Windows.Forms.Button Tarkov_Official;
-        private System.Windows.Forms.CheckBox needs_box;
-        private System.Windows.Forms.CheckBox barters_and_crafts_box;
         private System.Windows.Forms.Panel panel2;
         private System.Windows.Forms.Panel panel3;
         private System.Windows.Forms.Panel panel5;
@@ -810,16 +916,19 @@ namespace TarkovPriceViewer
         private System.Windows.Forms.Label ForFunRandom_Desc;
         private System.Windows.Forms.Timer check_idle_time;
         private System.Windows.Forms.Button refresh_b;
-        private System.Windows.Forms.Button Tarkov_Dev;
         private System.Windows.Forms.Panel panel8;
         private System.Windows.Forms.CheckBox TarkovTrackerCheckBox;
         private System.Windows.Forms.Label label2;
         private System.Windows.Forms.TextBox tarkovTrackerApiKey_textbox;
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.ToolTip TarkovTrackerAPI_tooltip;
-        private System.Windows.Forms.Button TarkovTracker_button;
-        private System.Windows.Forms.CheckBox hideoutUpgrades_checkBox;
-        private System.Windows.Forms.Button button1;
+        private System.Windows.Forms.Panel panel9;
+        private System.Windows.Forms.NumericUpDown worthThresholdNumeric;
+        private System.Windows.Forms.Label worthThresholdLabel;
+        private System.Windows.Forms.ComboBox languageBox;
+        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.ComboBox modeBox;
+        private System.Windows.Forms.Label label4;
     }
 }
 

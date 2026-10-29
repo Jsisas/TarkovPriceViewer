@@ -1,15 +1,21 @@
 ﻿using OpenCvSharp;
 using OpenCvSharp.Extensions;
+using Quickenshtein;
+using Sdcb.PaddleInference;
+using Sdcb.PaddleOCR;
+using Sdcb.PaddleOCR.Models;
+using Sdcb.PaddleOCR.Models.Online;
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Windows.Forms;
-using Tesseract;
 using static TarkovPriceViewer.TarkovAPI;
 
 namespace TarkovPriceViewer
@@ -86,6 +92,17 @@ namespace TarkovPriceViewer
         private static readonly int WM_KEYUP = 0x101;
         private static readonly int WH_MOUSE_LL = 14;
         private static readonly int WM_MOUSEMOVE = 0x200;
+        private static readonly int WM_LBUTTONUP = 0x0202;
+        private static readonly int WM_RBUTTONUP = 0x0205;
+        private static readonly int WM_MBUTTONUP = 0x0208;
+        private static readonly int WM_XBUTTONUP = 0x020C;
+        private const int MOUSE_LEFT = 1001;
+        private const int MOUSE_RIGHT = 1002;
+        private const int MOUSE_MIDDLE = 1003;
+        private const int MOUSE_X1 = 1004;
+        private const int MOUSE_X2 = 1005;
+        private const int XBUTTON1 = 0x0001;
+        private const int XBUTTON2 = 0x0002;
         private static bool isinfoclosed = true;
         private static bool iscompareclosed = true;
         private static LowLevelProc _proc_keyboard = null;
@@ -102,10 +119,18 @@ namespace TarkovPriceViewer
         private static Control press_key_control = null;
         private static Scalar linecolor = new Scalar(90, 89, 82);
         private static long idle_time = 3600000;
+        private static object lockObject = new object();
+        public static RecognizationModel languageModel = null;
+        private static PaddleOcrRecognizer ocrRecognizer = null;
+        private static readonly object ocrLock = new object();
         public static DateTime KeyPressedTime;
         private static DateTime presstime;
         public static bool WaitingForTooltip = false;
         public static bool GettingItemInfo = false;
+        public static string debugText1 = null;
+        public static string debugText2 = null;
+        private static readonly Mat roubleMat = BitmapConverter.ToMat(Properties.Resources.rouble);
+        private static readonly Mat dollarMat = BitmapConverter.ToMat(Properties.Resources.dollar);
 
         public MainForm()
         {
@@ -146,6 +171,20 @@ namespace TarkovPriceViewer
             }
         }
 
+        private void PaddleRecognizer(Action<PaddleOcrRecognizer> action)
+        {
+            EnsureRecognizer();
+            if (ocrRecognizer == null)
+            {
+                return;
+            }
+
+            lock (ocrLock)
+            {
+                action?.Invoke(ocrRecognizer);
+            }
+        }
+
         private void SettingUI()
         {
             MinimizeBox = false;
@@ -161,14 +200,40 @@ namespace TarkovPriceViewer
             buy_from_trader_box.Checked = Convert.ToBoolean(Program.settings["Buy_From_Trader"]);
             needs_box.Checked = Convert.ToBoolean(Program.settings["Needs"]);
             barters_and_crafts_box.Checked = Convert.ToBoolean(Program.settings["Barters_and_Crafts"]);
-            ShowOverlay_Button.Text = ((Keys)Int32.Parse(Program.settings["ShowOverlay_Key"])).ToString();
-            HideOverlay_Button.Text = ((Keys)Int32.Parse(Program.settings["HideOverlay_Key"])).ToString();
-            CompareOverlay_Button.Text = ((Keys)Int32.Parse(Program.settings["CompareOverlay_Key"])).ToString();
+            ShowOverlay_Button.Text = GetKeybindText(Program.settings["ShowOverlay_Key"]);
+            HideOverlay_Button.Text = GetKeybindText(Program.settings["HideOverlay_Key"]);
+            CompareOverlay_Button.Text = GetKeybindText(Program.settings["CompareOverlay_Key"]);
             TransParent_Bar.Value = Int32.Parse(Program.settings["Overlay_Transparent"]);
             TransParent_Text.Text = Program.settings["Overlay_Transparent"];
             TarkovTrackerCheckBox.Checked = Convert.ToBoolean(Program.settings["useTarkovTrackerAPI"]);
             hideoutUpgrades_checkBox.Checked = Convert.ToBoolean(Program.settings["showHideoutUpgrades"]);
             tarkovTrackerApiKey_textbox.Text = Program.settings["TarkovTrackerAPIKey"];
+            if (decimal.TryParse(Program.settings[Program.WorthPerSlotThresholdKey], NumberStyles.Any, CultureInfo.InvariantCulture, out var worthThreshold))
+            {
+                worthThreshold = Math.Max(worthThresholdNumeric.Minimum, Math.Min(worthThresholdNumeric.Maximum, worthThreshold));
+                worthThresholdNumeric.Value = worthThreshold;
+            }
+            else
+            {
+                worthThresholdNumeric.Value = (decimal)Program.WorthPerSlotThresholdDefault;
+            }
+
+            languageBox.Items.Add("en");
+            languageBox.Items.Add("ko");
+            languageBox.Items.Add("cn");
+            languageBox.Items.Add("jp");
+            languageBox.Items.Add("ru");
+            languageBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            languageBox.SelectedItem = Program.settings["Language"];
+            languageBox.SelectedIndexChanged += languageBox_SelectedIndexChanged;
+
+            modeBox.Items.Add("regular");
+            modeBox.Items.Add("pve");
+            modeBox.DropDownStyle = ComboBoxStyle.DropDownList;
+            modeBox.SelectedItem = Program.settings["Mode"];
+            modeBox.SelectedIndexChanged += modeBox_SelectedIndexChanged;
+
+            PaddleRecognizer(null);//init ocr
 
             TrayIcon.Visible = true;
             check_idle_time.Start();
@@ -197,10 +262,7 @@ namespace TarkovPriceViewer
                     _proc_keyboard = hookKeyboardProc;
                     hhook_keyboard = SetWindowsHookEx(WH_KEYBOARD_LL, _proc_keyboard, h_instance, 0);
                 }
-                if (Convert.ToBoolean(Program.settings["CloseOverlayWhenMouseMoved"]))
-                {
-                    setMouseHook();
-                }
+                setMouseHook();
             }
             catch (Exception e)
             {
@@ -253,40 +315,12 @@ namespace TarkovPriceViewer
                 {
                     if (press_key_control == null)
                     {
-                        if (Program.finishloadingballistics)
+                        if (true || Program.finishloadingballistics)
                         {
                             if ((Program.finishloadingTarkovTrackerAPI && Convert.ToBoolean(Program.settings["useTarkovTrackerAPI"])) || !Convert.ToBoolean(Program.settings["useTarkovTrackerAPI"]))
                             {
                                 int vkCode = Marshal.ReadInt32(lParam);
-                                if (vkCode == Int32.Parse(Program.settings["ShowOverlay_Key"]))
-                                {
-                                    KeyPressedTime = DateTime.Now;
-                                    Debug.WriteLine("\n\n----------------" + Program.settings["ShowOverlay_Key"] + " Key Pressed -----------------");
-                                    if ((!timer.Enabled || !WaitingForTooltip) && (KeyPressedTime - presstime).TotalMilliseconds >= 200)
-                                    {
-                                        point = Control.MousePosition;
-                                        WaitingForTooltip = true; timer.Start();
-                                        LoadingItemInfo();
-                                    }
-                                    else if ((KeyPressedTime - presstime).TotalMilliseconds < 200)
-                                    {
-                                        Debug.WriteLine("Key pressed in less than 200 milliseconds.");
-                                    }
-                                    presstime = KeyPressedTime;
-                                }
-                                else if (vkCode == Int32.Parse(Program.settings["CompareOverlay_Key"]))
-                                {
-                                    point = Control.MousePosition;
-                                    LoadingItemCompare();
-                                }
-                                else if (vkCode == Int32.Parse(Program.settings["HideOverlay_Key"])
-                                    || vkCode == 9 //tab
-                                    || vkCode == 27 //esc
-                                    )
-                                {
-                                    CloseItemInfo();
-                                    CloseItemCompare();
-                                }
+                                HandleGlobalKeyOrMouse(vkCode);
                             }
                             else
                             {
@@ -309,18 +343,102 @@ namespace TarkovPriceViewer
             return CallNextHookEx(hhook_keyboard, code, (int)wParam, lParam);
         }
 
+        private void HandleGlobalKeyOrMouse(int code)
+        {
+            try
+            {
+                int showKey = Int32.Parse(Program.settings["ShowOverlay_Key"]);
+                int compareKey = Int32.Parse(Program.settings["CompareOverlay_Key"]);
+                int hideKey = Int32.Parse(Program.settings["HideOverlay_Key"]);
+
+                if (code == showKey)
+                {
+                    KeyPressedTime = DateTime.Now;
+                    Debug.WriteLine("\n\n----------------" + Program.settings["ShowOverlay_Key"] + " Key Pressed -----------------");
+                    if ((!timer.Enabled || !WaitingForTooltip) && (KeyPressedTime - presstime).TotalMilliseconds >= 200)
+                    {
+                        point = Control.MousePosition;
+                        WaitingForTooltip = true; timer.Start();
+                        LoadingItemInfo();
+                    }
+                    else if ((KeyPressedTime - presstime).TotalMilliseconds < 200)
+                    {
+                        Debug.WriteLine("Key pressed in less than 200 milliseconds.");
+                    }
+                    presstime = KeyPressedTime;
+                }
+                else if (code == compareKey)
+                {
+                    point = Control.MousePosition;
+                    LoadingItemCompare();
+                }
+                else if (code == hideKey
+                    || code == 9 //tab
+                    || code == 27 //esc
+                    )
+                {
+                    CloseItemInfo();
+                    CloseItemCompare();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.WriteLine(e.Message);
+            }
+        }
+
         private IntPtr hookMouseProc(int code, IntPtr wParam, IntPtr lParam)
         {
             try
             {
-                if (!isinfoclosed && code >= 0
-                    && wParam == (IntPtr)WM_MOUSEMOVE
-                    && (Math.Abs(Control.MousePosition.X - point.X) > 60 || Math.Abs(Control.MousePosition.Y - point.Y) > 60))
+                if (code >= 0)
                 {
-                    timer.Stop(); WaitingForTooltip = false; repeatCount = 0;
-                    CloseItemInfo();
-                    Task UpdateAPI = Task.Factory.StartNew(() => Program.UpdateItemListAPI());
-                    Task UpdateTarkovTrackerAPI = Task.Factory.StartNew(() => Program.UpdateTarkovTrackerAPI());
+                    if (!isinfoclosed
+                        && Convert.ToBoolean(Program.settings["CloseOverlayWhenMouseMoved"]) 
+                        && wParam == (IntPtr)WM_MOUSEMOVE
+                        && (Math.Abs(Control.MousePosition.X - point.X) > 60 || Math.Abs(Control.MousePosition.Y - point.Y) > 60))
+                    {
+                        timer.Stop(); WaitingForTooltip = false; repeatCount = 0;
+                        CloseItemInfo();
+                        Task UpdateAPI = Task.Factory.StartNew(() => Program.UpdateItemListAPI());
+                        Task UpdateTarkovTrackerAPI = Task.Factory.StartNew(() => Program.UpdateTarkovTrackerAPI());
+                    }
+
+                    if (press_key_control == null)
+                    {
+                        int mouseCode = 0;
+
+                        if (wParam == (IntPtr)WM_LBUTTONUP)
+                        {
+                            mouseCode = MOUSE_LEFT;
+                        }
+                        else if (wParam == (IntPtr)WM_RBUTTONUP)
+                        {
+                            mouseCode = MOUSE_RIGHT;
+                        }
+                        else if (wParam == (IntPtr)WM_MBUTTONUP)
+                        {
+                            mouseCode = MOUSE_MIDDLE;
+                        }
+                        else if (wParam == (IntPtr)WM_XBUTTONUP)
+                        {
+                            int mouseData = Marshal.ReadInt32(lParam, 8);
+                            int buttonFlag = (mouseData >> 16) & 0xffff;
+                            if (buttonFlag == XBUTTON1)
+                            {
+                                mouseCode = MOUSE_X1;
+                            }
+                            else if (buttonFlag == XBUTTON2)
+                            {
+                                mouseCode = MOUSE_X2;
+                            }
+                        }
+
+                        if (mouseCode != 0)
+                        {
+                            HandleGlobalKeyOrMouse(mouseCode);
+                        }
+                    }
                 }
             }
             catch (Exception e)
@@ -328,6 +446,31 @@ namespace TarkovPriceViewer
                 Debug.WriteLine(e.Message);
             }
             return CallNextHookEx(hhook_mouse, code, (int)wParam, lParam);
+        }
+
+        private string GetKeybindText(string value)
+        {
+            int code;
+            if (!int.TryParse(value, out code))
+            {
+                return value;
+            }
+
+            switch (code)
+            {
+                case MOUSE_LEFT:
+                    return "Mouse Left";
+                case MOUSE_RIGHT:
+                    return "Mouse Right";
+                case MOUSE_MIDDLE:
+                    return "Mouse Middle";
+                case MOUSE_X1:
+                    return "Mouse X1";
+                case MOUSE_X2:
+                    return "Mouse X2";
+                default:
+                    return ((Keys)code).ToString();
+            }
         }
 
         private uint GetIdleTime()
@@ -358,12 +501,14 @@ namespace TarkovPriceViewer
 
         public void LoadingItemInfo()
         {
+            debugText1 = null;
+            debugText2 = null;
             isinfoclosed = false;
             cts_info.Cancel();
             cts_info = new CancellationTokenSource();
 
             if (timer.Enabled || WaitingForTooltip)
-                overlay_info.ShowWaitinfForTooltipInfo(point, cts_info.Token);
+                overlay_info.ShowWaitingForTooltipInfo(point, cts_info.Token);
             else
                 overlay_info.ShowLoadingInfo(point, cts_info.Token);
 
@@ -404,8 +549,16 @@ namespace TarkovPriceViewer
                 {
                     try
                     {
+                        if (Program.tarkovAPI == null)
+                        {
+                            throw new Exception();
+                        }
                         Item item = Program.tarkovAPI.items[new Random().Next(Program.tarkovAPI.items.Count - 1)];
-                        //item = MatchItemName("7.62x54r_7n37".ToLower().Trim().ToCharArray());
+                        //item = Program.tarkovAPI.items.FirstOrDefault(o => o.name == "Power cord");
+                        //if (item == null)
+                        //{
+                        //    return 0;
+                        //}
                         FindItemInfoAPI(item, isiteminfo, cts_one);
                     }
                     catch
@@ -487,7 +640,7 @@ namespace TarkovPriceViewer
             ShowtestImage("test", mat);
         }
 
-        private void ShowtestImage(String name, Mat mat)
+        private void ShowtestImage(string name, Mat mat)
         {
             Action show = delegate ()
             {
@@ -496,29 +649,102 @@ namespace TarkovPriceViewer
             Invoke(show);
         }
 
-        private String getTesseract(Mat textmat)
+        private void getPaddleModel()
+        {
+            Task getModel = Task.Run(async () => {
+                Debug.WriteLine("Download the paddle language model.");
+                RecognizationModel model;
+                if (Program.settings["Language"] == "ko")
+                {
+                    model = await LocalDictOnlineRecognizationModel.KoreanV4.DownloadAsync();
+                }
+                else if (Program.settings["Language"] == "cn")
+                {
+                    model = await LocalDictOnlineRecognizationModel.ChineseV4.DownloadAsync();
+                }
+                else if (Program.settings["Language"] == "jp")
+                {
+                    model = await LocalDictOnlineRecognizationModel.JapanV4.DownloadAsync();
+                }
+                else if (Program.settings["Language"] == "ru")
+                {
+                    model = await LocalDictOnlineRecognizationModel.CyrillicV3.DownloadAsync();
+                }
+                else
+                {
+                    model = await LocalDictOnlineRecognizationModel.EnglishV4.DownloadAsync();
+                }
+
+                lock (lockObject)
+                {
+                    Debug.WriteLine("language model setted.");
+                    languageModel = model;
+                }
+            });
+        }
+
+        private void EnsureRecognizer()
+        {
+            getPaddleModel();
+            if (languageModel == null)
+            {
+                return;
+            }
+
+            if (ocrRecognizer == null)
+            {
+                lock (ocrLock)
+                {
+                    if (ocrRecognizer == null)
+                    {
+                        try
+                        {
+                            ocrRecognizer = new PaddleOcrRecognizer(languageModel, PaddleDevice.Gpu());
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.WriteLine("Error creating PaddleOcrRecognizer: " + e.Message);
+                            try
+                            {
+                                ocrRecognizer = new PaddleOcrRecognizer(languageModel, PaddleDevice.Mkldnn());
+                            }
+                            catch (Exception ex)
+                            {
+                                Debug.WriteLine("Error creating CPU PaddleOcrRecognizer: " + ex.Message);
+                                ocrRecognizer = null;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private string getPaddleOCR(Mat textmat)
         {
             GettingItemInfo = true;
-            String text = "";
+            string text = "";
             try
             {
-                using (TesseractEngine ocr = new TesseractEngine(@"./Resources/tessdata", "eng", EngineMode.Default))//should use once
-                using (Bitmap temp = BitmapConverter.ToBitmap(textmat))
-                using (Page texts = ocr.Process(temp))
+                EnsureRecognizer();
+                if (ocrRecognizer == null)
                 {
-                    text = texts.GetText().Replace("\n", " ").Split(Program.splitcur)[0].Trim();
+                    GettingItemInfo = false;
+                    return text;
+                }
 
-                    if (text == "GELLER")
-                        text = "Hand drill";
-                    else if (text == "[ZEULELED")
-                        text = "Bandana";
-
-                    Debug.WriteLine("Tesseract Text : " + text);
+                lock (ocrLock)
+                {
+                    var result = ocrRecognizer.Run(textmat);
+                    if (result.Score > 0.5f)
+                    {
+                        text = result.Text.Replace("\n", " ").Split(Program.splitcur)[0].Trim();
+                    }
+                    Debug.WriteLine(result.Score + " Paddle Text : " + result.Text);
                 }
             }
             catch (Exception e)
             {
-                Debug.WriteLine("Tesseract error: " + e.Message);
+                Debug.WriteLine("Paddle error: " + e.Message);
                 GettingItemInfo = false;
             }
             GettingItemInfo = false;
@@ -542,18 +768,33 @@ namespace TarkovPriceViewer
                         if (rect2.Width > 5 && rect2.Height > 10)
                         {
                             ScreenMat.Rectangle(rect2, Scalar.Black, 2);
-                            using (Mat temp = ScreenMat.SubMat(rect2))
-                            using (Mat temp2 = temp.Threshold(0, 255, ThresholdTypes.BinaryInv))
-                            {
-                                String text = getTesseract(temp);
-                                String text2 = getTesseract(temp2);
+                            Mat temp = ScreenMat.SubMat(rect2);
+                            Mat temp2 = temp.Threshold(0, 255, ThresholdTypes.BinaryInv);
 
-                                if (!text.Equals("") || !text2.Equals("")) //If tooltip text found
-                                {
-                                    item = MatchItemNameAPI(text, text2);
-                                    break;
-                                }
+                            int checkedMoneyY = CheckYMoneyImage(temp);
+                            if (checkedMoneyY != 0)
+                            {
+                                Rect rect = new Rect(0, 0, temp.Width, checkedMoneyY);
+                                Mat checktemp = temp;
+                                temp = temp.SubMat(rect);
+                                checktemp.Dispose();
+                                checktemp = temp2;
+                                temp2 = temp2.SubMat(rect);
+                                checktemp.Dispose();
                             }
+                            string text = getPaddleOCR(temp);
+                            string text2 = getPaddleOCR(temp2);
+
+                            if (!text.Equals("") || !text2.Equals("")) //If tooltip text found
+                            {
+                                item = MatchItemNameAPI(text, text2);
+                                debugText1 = text;
+                                debugText2 = text2;
+                                break;
+                            }
+
+                            temp.Dispose();
+                            temp2.Dispose();
                         }
                         /*else
                             timer.Start(); WaitingForTooltip = true;*/
@@ -567,55 +808,84 @@ namespace TarkovPriceViewer
             }
             fullimage.Dispose();
         }
+        private int CheckYMoneyImage(Mat image)
+        {
+            using (Mat result = new Mat())
+            {
+                Cv2.MatchTemplate(image, roubleMat, result, TemplateMatchModes.CCoeffNormed);
+                OpenCvSharp.Point minloc, maxloc;
+                double minval, maxval;
+                Cv2.MinMaxLoc(result, out minval, out maxval, out minloc, out maxloc);
+                if (maxval > 0.9)
+                {
+                    return Math.Min(minloc.Y, maxloc.Y);
+                }
+                Cv2.MatchTemplate(image, dollarMat, result, TemplateMatchModes.CCoeffNormed);
+                Cv2.MinMaxLoc(result, out minval, out maxval, out minloc, out maxloc);
+                if (maxval > 0.9)
+                {
+                    return Math.Min(minloc.Y, maxloc.Y);
+                }
+            }
+            return 0;
+        }
 
         private Item MatchItemNameAPI(string name, string name2)
         {
-            char[] itemname = name.ToLower().Trim().ToCharArray();
-            char[] itemname2 = name2.ToLower().Trim().ToCharArray();
-
-            var result = new Item();
-            int d = 999;
-            foreach (var item in Program.tarkovAPI.items)
-            {
-                int d2;
-                if (itemname.Length > 0)
-                {
-                    d2 = levenshteinDistance(itemname, item.name.ToLower().ToCharArray());
-                    if (d2 < d)
-                    {
-                        result = item;
-                        d = d2;
-                        if (d == 0)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (itemname2.Length > 0)
-                {
-                    d2 = levenshteinDistance(itemname2, item.name.ToLower().ToCharArray());
-                    if (d2 < d)
-                    {
-                        result = item;
-                        d = d2;
-                        if (d == 0)
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-            if (result.name != null)
-            {
-                timer.Stop(); WaitingForTooltip = false; repeatCount = 0;
-            }
+            Item result = new Item();
             if (name == "Encrypted message" || name2 == "Encrypted message")
             {
-                result = new Item();
                 result.name = "Encrypted Message";
             }
-            Debug.WriteLine(d + " text match : " + result.name);
+            else
+            {
+                var itemname = name.ToLower().Trim();
+                var itemname2 = name2.ToLower().Trim();
+
+                if (Program.tarkovAPI == null)
+                {
+                    Debug.WriteLine("error : no item list.");
+                    return result;
+                }
+                int d = 999;
+                foreach (var item in Program.tarkovAPI.items)
+                {
+                    var temp = item.name.ToLower().Trim();
+                    int d2;
+                    if (itemname.Length > 0)
+                    {
+                        d2 = Levenshtein.GetDistance(itemname, temp);
+                        if (d2 < d)
+                        {
+                            result = item;
+                            d = d2;
+                            if (d == 0)
+                            {
+                                break;
+                            }
+                        }
+                    }
+
+                    if (itemname2.Length > 0)
+                    {
+                        d2 = Levenshtein.GetDistance(itemname2, temp);
+                        if (d2 < d)
+                        {
+                            result = item;
+                            d = d2;
+                            if (d == 0)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (result.name != null)
+                {
+                    timer.Stop(); WaitingForTooltip = false; repeatCount = 0;
+                }
+                Debug.WriteLine(d + " text match : " + result.name);
+            }
             return result;
         }
 
@@ -625,40 +895,6 @@ namespace TarkovPriceViewer
             if (minNumber > val2) minNumber = val2;
             if (minNumber > val3) minNumber = val3;
             return minNumber;
-        }
-
-        private int levenshteinDistance(char[] s, char[] t)
-        {
-            int m = s.Length;
-            int n = t.Length;
-
-            int[,] d = new int[m + 1, n + 1];
-
-            for (int i = 1; i < m; i++)
-            {
-                d[i, 0] = i;
-            }
-
-            for (int j = 1; j < n; j++)
-            {
-                d[0, j] = j;
-            }
-
-            for (int j = 1; j < n; j++)
-            {
-                for (int i = 1; i < m; i++)
-                {
-                    if (s[i] == t[j])
-                    {
-                        d[i, j] = d[i - 1, j - 1];
-                    }
-                    else
-                    {
-                        d[i, j] = getMinimum(d[i - 1, j], d[i, j - 1], d[i - 1, j - 1]) + 1;
-                    }
-                }
-            }
-            return d[m - 1, n - 1];
         }
 
         private void FindItemInfoAPI(Item item, bool isiteminfo, CancellationToken cts_one)
@@ -759,6 +995,12 @@ namespace TarkovPriceViewer
                 {
                     press_key_control.Text = keycode.ToString();
                 }
+                else
+                {
+                    ShowOverlay_Button.Text = GetKeybindText(Program.settings["ShowOverlay_Key"]);
+                    HideOverlay_Button.Text = GetKeybindText(Program.settings["HideOverlay_Key"]);
+                    CompareOverlay_Button.Text = GetKeybindText(Program.settings["CompareOverlay_Key"]);
+                }
                 press_key_control = null;
             }
         }
@@ -788,7 +1030,7 @@ namespace TarkovPriceViewer
 
         private void TransParent_Bar_Scroll(object sender, EventArgs e)
         {
-            TrackBar tb = (sender as TrackBar);
+            System.Windows.Forms.TrackBar tb = (sender as System.Windows.Forms.TrackBar);
             Program.settings["Overlay_Transparent"] = tb.Value.ToString();
             TransParent_Text.Text = Program.settings["Overlay_Transparent"] + "%";
             overlay_info.ChangeTransparent(tb.Value);
@@ -819,10 +1061,10 @@ namespace TarkovPriceViewer
                     float highv = 0;
                     foreach (var github in Program.github)
                     {
-                        String check = wc.DownloadString(github + Program.checkupdate);
+                        string check = wc.DownloadString(github + Program.checkupdate);
                         if (!check.Equals(""))
                         {
-                            String sp = check.Split('\n')[0];
+                            string sp = check.Split('\n')[0];
                             if (sp.Contains("Tarkov Price Viewer"))
                             {
                                 String[] sp2 = sp.Split(' ');
@@ -892,6 +1134,11 @@ namespace TarkovPriceViewer
             Program.settings["Buy_From_Trader"] = (sender as CheckBox).Checked.ToString();
         }
 
+        private void worthThresholdNumeric_ValueChanged(object sender, EventArgs e)
+        {
+            Program.settings[Program.WorthPerSlotThresholdKey] = worthThresholdNumeric.Value.ToString(CultureInfo.InvariantCulture);
+        }
+
         private void needs_box_CheckedChanged(object sender, EventArgs e)
         {
             Program.settings["Needs"] = (sender as CheckBox).Checked.ToString();
@@ -933,7 +1180,7 @@ namespace TarkovPriceViewer
         {
             Program.settings["TarkovTrackerAPIKey"] = tarkovTrackerApiKey_textbox.Text;
             Task.Factory.StartNew(() => Program.UpdateTarkovTrackerAPI());
-            
+
             SetHook(true);
         }
 
@@ -975,6 +1222,44 @@ namespace TarkovPriceViewer
         private void hideoutUpgrades_checkBox_CheckedChanged(object sender, EventArgs e)
         {
             Program.settings["showHideoutUpgrades"] = (sender as CheckBox).Checked.ToString();
+        }
+
+        private void languageBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if ((sender as System.Windows.Forms.ComboBox).SelectedIndex >= 0)
+            {
+                Program.settings["Language"] = (sender as System.Windows.Forms.ComboBox).SelectedItem.ToString();
+            }
+            else
+            {
+                Program.settings["Language"] = "en";
+            }
+            lock (lockObject)
+            {
+                languageModel = null;
+            }
+            PaddleRecognizer(null);//init ocr
+
+            Program.forceUpdateAPI = true;
+            Program.forceUpdateTrackerAPI = true;
+            Task.Factory.StartNew(() => Program.UpdateItemListAPI());
+            Task.Factory.StartNew(() => Program.UpdateTarkovTrackerAPI());
+        }
+
+        private void modeBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if ((sender as System.Windows.Forms.ComboBox).SelectedIndex >= 0)
+            {
+                Program.settings["Mode"] = (sender as System.Windows.Forms.ComboBox).SelectedItem.ToString();
+            }
+            else
+            {
+                Program.settings["Mode"] = "regular";
+            }
+            Program.forceUpdateAPI = true;
+            Program.forceUpdateTrackerAPI = true;
+            Task.Factory.StartNew(() => Program.UpdateItemListAPI());
+            Task.Factory.StartNew(() => Program.UpdateTarkovTrackerAPI());
         }
     }
 }

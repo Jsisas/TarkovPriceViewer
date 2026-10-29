@@ -29,10 +29,12 @@ namespace TarkovPriceViewer
         private static bool ismoving = false;
         private static int x, y;
         public static DateTime startTime;
-        private static string waitinfForTooltipText = Program.waitingForTooltip;
+        private static string waitinfForTooltipText = MainForm.languageModel == null ? Program.languageLoading : Program.waitingForTooltip;
         private static int DotsCounter = 0;
 
         private Object _lock = new Object();
+
+        private static readonly Dictionary<string, string> LootTierByName = TarkovPriceViewer.LootTierMapping.ByName;
 
         public Overlay(bool _isinfoform)
         {
@@ -178,10 +180,22 @@ namespace TarkovPriceViewer
                             //Loot Tier
                             SetLootTierPerSlot(item);
                             if (item.lootTier != null)
-                                sb.Append(String.Format("{0}", item.lootTier));
+                                sb.Append(String.Format("[{0}/{1}]{2}", Convert.ToString(Program.settings["Mode"]) == "regular" ? "PVP" : "PVE", Convert.ToString(Program.settings["Language"]), item.lootTier));
 
                             //Name
                             sb.Append(String.Format("\n{0}", item.name));
+
+                            if (Convert.ToBoolean(Program.settings["ShowTextFound"]))
+                            {
+                                if (!string.IsNullOrEmpty(MainForm.debugText1))
+                                {
+                                    sb.Append(String.Format("\n{0}", MainForm.debugText1));
+                                }
+                                if (!string.IsNullOrEmpty(MainForm.debugText2))
+                                {
+                                    sb.Append(String.Format("\n{0}", MainForm.debugText2));
+                                }
+                            }
 
                             //Helmet/Armour Class
                             if (item.properties != null && item.properties._class != null)
@@ -212,9 +226,8 @@ namespace TarkovPriceViewer
                             //Find best trader to sell to
                             if (item.sellFor.Count > 0)
                             {
-                                List<SellFor> list = new List<SellFor>(item.sellFor);
-                                List<SellFor> sortedVendor = new List<SellFor>(list.OrderByDescending(p => p.priceRUB));
-                                var lastSortedVendor = item.sellFor[0];
+                                List<SellFor> sortedVendor = item.sellFor.OrderByDescending(p => p.priceRUB).ToList();
+                                var lastSortedVendor = sortedVendor[0];
 
                                 if (sortedVendor[0].vendor.name == "Flea Market" && sortedVendor.Count > 1 && flea_profit > 0)
                                 {
@@ -239,16 +252,16 @@ namespace TarkovPriceViewer
 
                                 if (vendorPrice > 0)
                                 {
+                                    string pricePerSlotDetails = GetPricePerSlotDetails(item, vendorPrice, mainCurrency);
                                     sb = RemoveTrailingLineBreaks(sb);
-                                    sb.Append(String.Format("\n\nBest sell to {0} --> {1}{2}", BestSellTo_vendorName, vendorPrice.ToString("N0"), mainCurrency));
+                                    sb.Append(String.Format("\n\nBest sell to {0} --> {1}{2}{3}", BestSellTo_vendorName, vendorPrice.ToString("N0"), mainCurrency, pricePerSlotDetails));
                                 }
                             }
 
                             //Find best trader to buy from
                             if (item.buyFor.Count > 0)
                             {
-                                List<BuyFor> list = new List<BuyFor>(item.buyFor);
-                                var sortedVendor = list.OrderBy(p => p.priceRUB).First();
+                                var sortedVendor = item.buyFor.OrderBy(p => p.priceRUB).First();
                                 BestBuyFrom_vendorName = sortedVendor.vendor.name;
 
                                 int vendorPrice = sortedVendor.priceRUB.Value;
@@ -281,7 +294,7 @@ namespace TarkovPriceViewer
                             bool sellToText = false;
                             if (Convert.ToBoolean(Program.settings["Sell_to_Trader"]) && item.sellFor.Count > 0)
                             {
-                                List<SellFor> list = new List<SellFor>(item.sellFor);
+                                List<SellFor> list = item.sellFor.ToList();
                                 list.RemoveAll(p => p.vendor.name == "Flea Market");
                                 if (list.Count > 0)
                                 {
@@ -293,15 +306,16 @@ namespace TarkovPriceViewer
 
                                     if (BestSellTo_vendorName != vendorName)
                                     {
+                                        string pricePerSlotDetails = GetPricePerSlotDetails(item, sortedNoFlea.priceRUB.Value, mainCurrency);
                                         sb = RemoveTrailingLineBreaks(sb);
-                                        sb.Append(String.Format("\n\nSell to {0} --> {1}{2}", vendorName, sortedNoFlea.priceRUB.Value.ToString("N0"), mainCurrency));
+                                        sb.Append(String.Format("\n\nSell to {0} --> {1}{2}{3}", vendorName, sortedNoFlea.priceRUB.Value.ToString("N0"), mainCurrency, pricePerSlotDetails));
                                         sellToText = true;
                                     }
                                 }
                             }
                             if (Convert.ToBoolean(Program.settings["Buy_From_Trader"]) && item.buyFor.Count > 0)
                             {
-                                List<BuyFor> list = new List<BuyFor>(item.buyFor);
+                                List<BuyFor> list = item.buyFor.ToList();
                                 list.RemoveAll(p => p.vendor.name == "Flea Market");
                                 if (list.Count > 0)
                                 {
@@ -362,6 +376,13 @@ namespace TarkovPriceViewer
                                         tasks += task.name;
                                     if (task.map != null)
                                         tasks += " [" + task.map.name + "]";
+
+                                    var count = task.GetItemCount(item.id);
+                                    if (count > 0)
+                                    {
+                                        tasks += "(x" + count + ")";
+                                    }
+
                                     tasks += "\n";
                                 }
                                 sb = RemoveTrailingLineBreaks(sb);
@@ -385,7 +406,7 @@ namespace TarkovPriceViewer
                                             {
                                                 if (item.id == itemReq.item.id && !Program.tarkovTrackerAPI.data.hideoutModulesProgress.Any(e => e.id.Equals(stationLevel.id)))
                                                 {
-                                                    upgradesList.Add(new hideoutUpgrades() { Name = station.name, Level = stationLevel.level });
+                                                    upgradesList.Add(new hideoutUpgrades() { Name = station.name, Level = stationLevel.level, Count = itemReq.count, isInRaid = itemReq.isInRaid });
                                                 }
                                             }
                                         }
@@ -395,7 +416,7 @@ namespace TarkovPriceViewer
                                         var sortedUpgradesList = new List<hideoutUpgrades>(upgradesList.OrderBy(p => p.Level));
 
                                         foreach (var upgrade in sortedUpgradesList)
-                                            upgrades += "[Level " + upgrade.Level + "] " + upgrade.Name + "\n";
+                                            upgrades += "[Level " + upgrade.Level + "] " + upgrade.Name + " x" + upgrade.Count + (upgrade.isInRaid ? "(in raid)" : "") + "\n";
 
                                         sb = RemoveTrailingLineBreaks(sb);
                                         sb.Append(String.Format("\n\nNeeded for Hideout:\n{0}", upgrades));
@@ -418,7 +439,7 @@ namespace TarkovPriceViewer
                                             {
                                                 if (item.id == itemReq.item.id)
                                                 {
-                                                    upgradesList.Add(new hideoutUpgrades() { Name = station.name, Level = stationLevel.level });
+                                                    upgradesList.Add(new hideoutUpgrades() { Name = station.name, Level = stationLevel.level, Count = itemReq.count, isInRaid = itemReq.isInRaid });
                                                 }
                                             }
                                         }
@@ -429,7 +450,7 @@ namespace TarkovPriceViewer
 
                                         foreach (var upgrade in sortedUpgradesList)
                                         {
-                                            upgrades += "[Level " + upgrade.Level + "] " + upgrade.Name + "\n";
+                                            upgrades += "[Level " + upgrade.Level + "] " + upgrade.Name + " x" + upgrade.Count + (upgrade.isInRaid ? "(in raid)" : "") + "\n";
                                         }
 
                                         sb = RemoveTrailingLineBreaks(sb);
@@ -560,41 +581,87 @@ namespace TarkovPriceViewer
             Invoke(show);
         }
 
+        private decimal? GetValuePerSlot(Item item, decimal? priceOverride = null)
+        {
+            if (item == null)
+                return null;
+
+            int? width = null;
+            int? height = null;
+
+            if (item.types != null && item.types.Exists(e => e.Equals("gun")))
+            {
+                if (item.properties != null && item.properties.defaultWidth != null && item.properties.defaultHeight != null)
+                {
+                    width = item.properties.defaultWidth;
+                    height = item.properties.defaultHeight;
+                }
+            }
+
+            if (width == null || height == null)
+            {
+                if (item.width != null && item.height != null)
+                {
+                    width = item.width;
+                    height = item.height;
+                }
+            }
+
+            if (width == null || height == null || width.Value <= 0 || height.Value <= 0)
+                return null;
+
+            int slotCount = width.Value * height.Value;
+            if (slotCount <= 0)
+                return null;
+
+            decimal? fallbackPrice = item.lastLowPrice.HasValue ? (decimal?)item.lastLowPrice.Value : null;
+            decimal? price = priceOverride ?? fallbackPrice;
+
+            if (price == null || price.Value <= 0)
+                return null;
+
+            return price.Value / slotCount;
+        }
+
         private void SetLootTierPerSlot(Item item)
         {
-            if (item.lastLowPrice != null || item.lastLowPrice > 0)
-            {
-                float? valuePerSlot = null;
-                if (item.types.Exists(e => e.Equals("gun")))
-                    valuePerSlot = item.lastLowPrice.Value / (item.properties.defaultHeight.Value * item.properties.defaultWidth.Value);
-                else if (item.height != null && item.width != null)
-                    valuePerSlot = item.lastLowPrice.Value / (item.height.Value * item.width.Value);
+            if (item == null)
+                return;
 
-                if (valuePerSlot == null)
-                {
-                    item.lootTier = "No";
-                }
-                else if (!item.types.Exists(e => e.Equals("ammo")))
-                {
-                    if (valuePerSlot < 8500)
-                        item.lootTier = "Loot Tier F";
-                    else if (valuePerSlot >= 8500 && valuePerSlot < 21000)
-                        item.lootTier = "Loot Tier E";
-                    else if (valuePerSlot >= 21000 && valuePerSlot < 26750)
-                        item.lootTier = "Loot Tier D";
-                    else if (valuePerSlot >= 26750 && valuePerSlot < 34250)
-                        item.lootTier = "Loot Tier C";
-                    else if (valuePerSlot >= 34250 && valuePerSlot < 45500)
-                        item.lootTier = "Loot Tier B";
-                    else if (valuePerSlot >= 45500 && valuePerSlot < 63000)
-                        item.lootTier = "Loot Tier A";
-                    else if (valuePerSlot >= 63000 && valuePerSlot < 100000)
-                        item.lootTier = "Loot Tier S";
-                    else if (valuePerSlot >= 100000 && valuePerSlot < 500000)
-                        item.lootTier = "Loot Tier S+";
-                    else if (valuePerSlot >= 500000 && valuePerSlot < 2000000)
-                        item.lootTier = "Loot Tier S++";
-                }
+            string mappedTier;
+            if (!string.IsNullOrEmpty(item.name) && LootTierByName.TryGetValue(item.name, out mappedTier))
+            {
+                item.lootTier = "[★] Loot Tier " + mappedTier + " (tarkov.dev)";
+                return;
+            }
+
+            decimal? valuePerSlot = GetValuePerSlot(item);
+
+            if (valuePerSlot == null)
+            {
+                item.lootTier = "No";
+            }
+            else if (item.types == null || !item.types.Exists(e => e.Equals("ammo")))
+            {
+                string slotTier = null;
+
+                if (valuePerSlot < 8500)
+                    slotTier = "F";
+                else if (valuePerSlot >= 8500 && valuePerSlot < 21000)
+                    slotTier = "E";
+                else if (valuePerSlot >= 21000 && valuePerSlot < 26750)
+                    slotTier = "D";
+                else if (valuePerSlot >= 26750 && valuePerSlot < 34250)
+                    slotTier = "C";
+                else if (valuePerSlot >= 34250 && valuePerSlot < 45500)
+                    slotTier = "B";
+                else if (valuePerSlot >= 45500 && valuePerSlot < 63000)
+                    slotTier = "A";
+                else if (valuePerSlot >= 63000)
+                    slotTier = "S";
+
+                if (slotTier != null)
+                    item.lootTier = "Loot Tier " + slotTier + " (per slot)";
             }
         }
 
@@ -613,8 +680,8 @@ namespace TarkovPriceViewer
                 {
                     HtmlAgilityPack.HtmlDocument doc = new HtmlAgilityPack.HtmlDocument();
                     doc.LoadHtml(wc.DownloadString(item.wikiLink));
-                    HtmlAgilityPack.HtmlNode node = doc.DocumentNode.SelectSingleNode("//div[@class='mw-parser-output']");
-                    var subnode = node.SelectSingleNode("//p[3]");
+                    HtmlAgilityPack.HtmlNode node = doc?.DocumentNode.SelectSingleNode("//div[@class='mw-parser-output']");
+                    var subnode = node?.SelectSingleNode("//p[3]");
                     if (subnode != null)
                         return subnode.InnerText;
                     else
@@ -656,7 +723,7 @@ namespace TarkovPriceViewer
                         {
                             if (--compare_size > 0)
                             {
-                                itemcompare_text.Text = String.Format("{0} Left : {1}", Program.loading, compare_size);
+                                itemcompare_text.Text = String.Format("{0} Left : {1}", MainForm.languageModel == null ? Program.languageLoading : Program.waitingForTooltip, compare_size);
                             }
                             else
                             {
@@ -908,6 +975,13 @@ namespace TarkovPriceViewer
                 iteminfo_text.Select(m.Index, m.Length);
                 iteminfo_text.SelectionColor = Color.Orange;
             }
+
+            mc = new Regex("WORTH").Matches(iteminfo_text.Text);
+            foreach (Match m in mc)
+            {
+                iteminfo_text.Select(m.Index, m.Length);
+                iteminfo_text.SelectionColor = Color.LimeGreen;
+            }
         }
 
         public void ShowLoadingInfo(Point point, CancellationToken cts_one)
@@ -919,7 +993,7 @@ namespace TarkovPriceViewer
                     //waitinfForTooltipText = Program.waitingForTooltip;
                     iteminfo_ball.Rows.Clear();
                     iteminfo_ball.Visible = false;
-                    iteminfo_text.Text = Program.loading;
+                    iteminfo_text.Text = MainForm.languageModel == null ? Program.languageLoading : Program.waitingForTooltip;
                     iteminfo_panel.Location = new Point(point.X + 20, point.Y + 20);
                     iteminfo_panel.Visible = true;
                 }
@@ -927,7 +1001,7 @@ namespace TarkovPriceViewer
             Invoke(show);
         }
 
-        public void ShowWaitinfForTooltipInfo(Point point, CancellationToken cts_one)
+        public void ShowWaitingForTooltipInfo(Point point, CancellationToken cts_one)
         {
             Action show = delegate ()
             {
@@ -938,13 +1012,16 @@ namespace TarkovPriceViewer
 
                     if (DotsCounter < 3)
                     {
-                        waitinfForTooltipText += ".";
                         DotsCounter++;
                     }
                     else
                     {
-                        waitinfForTooltipText = Program.waitingForTooltip + ".";
                         DotsCounter = 1;
+                    }
+                    waitinfForTooltipText = MainForm.languageModel == null ? Program.languageLoading : Program.waitingForTooltip;
+                    for (var i = 0; i < DotsCounter; i++)
+                    {
+                        waitinfForTooltipText += ".";
                     }
                     iteminfo_panel.Location = new Point(point.X + 20, point.Y + 20);
                     iteminfo_text.Text = waitinfForTooltipText;
@@ -1003,7 +1080,7 @@ namespace TarkovPriceViewer
                             itemcompare_panel.Visible = true;
                             itemcompare_text.Text = String.Format("{0}", Program.presscomparekey);
                         }
-                        itemcompare_text.Text = String.Format("{0} Left : {1}", Program.loading, ++compare_size);
+                        itemcompare_text.Text = String.Format("{0} Left : {1}", MainForm.languageModel == null ? Program.languageLoading : Program.waitingForTooltip, ++compare_size);
                     }
                 }
             };
@@ -1114,11 +1191,28 @@ namespace TarkovPriceViewer
 
             return input;
         }
+
+        private string GetPricePerSlotDetails(Item item, int vendorPrice, string mainCurrency)
+        {
+            if (item == null || vendorPrice <= 0)
+                return string.Empty;
+
+            decimal? pricePerSlot = GetValuePerSlot(item, vendorPrice);
+            if (!pricePerSlot.HasValue)
+                return string.Empty;
+
+            string worthSuffix = pricePerSlot.Value >= Program.GetWorthPerSlotThreshold() ? " WORTH" : string.Empty;
+
+            return String.Format(" ({0}{1}/slot){2}", pricePerSlot.Value.ToString("N0"), mainCurrency, worthSuffix);
+        }
     }
 
     public class hideoutUpgrades
     {
         public string Name { get; set; }
         public int? Level { get; set; }
+        public int? Count { get; set; }
+
+        public bool isInRaid { get; set; }
     }
 }

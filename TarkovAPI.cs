@@ -1,15 +1,18 @@
 ﻿using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace TarkovPriceViewer
 {
-	public class ResponseShell
+    public class ResponseShell
     {
         public List<GQLError> errors { get; set; }
 
         public TarkovAPI.Data data { get; set; }
 
+        [JsonConverter(typeof(GQLErrorConverter))]
         public class GQLError
         {
             public string message { get; set; }
@@ -20,6 +23,37 @@ namespace TarkovPriceViewer
                 public int column { get; set; }
             }
             public List<Object> path;
+        }
+
+        // Accepts errors both as objects ({"message":"..."}) and as plain strings.
+        public class GQLErrorConverter : JsonConverter
+        {
+            public override bool CanConvert(Type objectType)
+            {
+                return objectType == typeof(GQLError);
+            }
+
+            public override bool CanWrite
+            {
+                get { return false; }
+            }
+
+            public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
+            {
+                JToken token = JToken.Load(reader);
+                if (token.Type == JTokenType.String)
+                {
+                    return new GQLError { message = token.ToString() };
+                }
+                GQLError error = new GQLError();
+                serializer.Populate(token.CreateReader(), error);
+                return error;
+            }
+
+            public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+            {
+                throw new NotSupportedException();
+            }
         }
     }
 
@@ -129,8 +163,30 @@ namespace TarkovPriceViewer
 
         public class ItemRequirement
         {
-            public Item item { get; set; }
+            public HideoutItem item { get; set; }
             public int? count { get; set; }
+            public List<HideoutAttributes> attributes { get; set; }
+
+            public bool isInRaid
+            {
+                get
+                {
+                    var att = attributes?.FirstOrDefault();
+                    return att?.type == "foundInRaid" && att.value == "true";
+                }
+            }
+        }
+
+        public class HideoutAttributes
+        {
+            public string type { get; set; }
+            public string value { get; set; }
+        }
+
+        public class HideoutItem
+        {
+            public string id { get; set; }
+            public string name { get; set; }
         }
 
         public class Level
@@ -150,6 +206,17 @@ namespace TarkovPriceViewer
             public string id { get; set; }
             public string description { get; set; }
             public List<Map> maps { get; set; }
+
+            public bool? optional { get; set; }
+            public string type { get; set; }
+            public int? count { get; set; }
+            public List<TaskItem> items { get; set; }
+        }
+
+        public class TaskItem
+        {
+            public string id { get; set; }
+            public string name { get; set; }
         }
 
         public class Properties
@@ -185,7 +252,7 @@ namespace TarkovPriceViewer
         public class RewardItem
         {
             public Item item { get; set; }
-            public float? count { get; set; }
+            public int? count { get; set; }
             public float? quantity { get; set; }
         }
 
@@ -232,6 +299,11 @@ namespace TarkovPriceViewer
             public Map map { get; set; }
             public int? minPlayerLevel { get; set; }
             public List<TraderLevelRequirement> traderLevelRequirements { get; set; }
+
+            public int GetItemCount(string itemid)
+            {
+                return objectives?.FirstOrDefault(o => o.optional == false && (o.type == "giveItem" || o.type == "plantItem") && o.items.Any(o_ => o_.id == itemid))?.count ?? 0;
+            }
         }
 
         public class Vendor
